@@ -321,6 +321,8 @@ export default function SpritePlayer() {
   const [naturalSize, setNaturalSize] = useState({ w: 0, h: 0 });
   const [orientation, setOrientation] = useState('vertical');
   const [framesInput, setFramesInput] = useState('6');
+  const [columnsInput, setColumnsInput] = useState('4');
+  const [rowsInput, setRowsInput] = useState('2');
   const [fps, setFps] = useState(DEFAULT_FPS);
   const [framesPerImage, setFramesPerImage] = useState(1);
   const [config, setConfig] = useState(null);
@@ -430,13 +432,42 @@ export default function SpritePlayer() {
       setError('Chargez une image et attendez le chargement.');
       return;
     }
-    const n = parseInt(String(framesInput).trim(), 10);
-    if (!Number.isFinite(n) || n < 1) {
-      setError('Indiquez un nombre de frames ≥ 1.');
-      return;
-    }
 
-    const { frameW, frameH } = computeFrameSize(naturalSize.w, naturalSize.h, n, orientation);
+    let frames;
+    let columns;
+    let rows;
+    let frameW;
+    let frameH;
+
+    if (orientation === 'grid') {
+      columns = parseInt(String(columnsInput).trim(), 10);
+      rows = parseInt(String(rowsInput).trim(), 10);
+      if (!Number.isFinite(columns) || columns < 1) {
+        setError('Indiquez un nombre de colonnes ≥ 1.');
+        return;
+      }
+      if (!Number.isFinite(rows) || rows < 1) {
+        setError('Indiquez un nombre de rangées ≥ 1.');
+        return;
+      }
+      frames = columns * rows;
+      ({ frameW, frameH } = computeFrameSize(naturalSize.w, naturalSize.h, frames, orientation, {
+        columns,
+        rows,
+      }));
+    } else {
+      frames = parseInt(String(framesInput).trim(), 10);
+      if (!Number.isFinite(frames) || frames < 1) {
+        setError('Indiquez un nombre de frames ≥ 1.');
+        return;
+      }
+      ({ frameW, frameH } = computeFrameSize(
+        naturalSize.w,
+        naturalSize.h,
+        frames,
+        orientation
+      ));
+    }
 
     if (!Number.isFinite(frameW) || !Number.isFinite(frameH) || frameW < 1 || frameH < 1) {
       setError('Dimensions de frame invalides.');
@@ -444,10 +475,11 @@ export default function SpritePlayer() {
     }
 
     setConfig({
-      frames: n,
+      frames,
       frameW,
       frameH,
       orientation,
+      ...(orientation === 'grid' ? { columns, rows } : {}),
       fullW: naturalSize.w,
       fullH: naturalSize.h,
     });
@@ -457,7 +489,7 @@ export default function SpritePlayer() {
     setExcludedFrames({});
     setFrameOffsets({});
     setPositionPanelOpen(false);
-  }, [imageSrc, naturalSize, framesInput, orientation]);
+  }, [imageSrc, naturalSize, framesInput, columnsInput, rowsInput, orientation]);
 
   const playbackFrameCount = config
     ? config.frames + (appendEmptyFrame ? 1 : 0)
@@ -908,43 +940,83 @@ export default function SpritePlayer() {
           <div className="mb-4 flex flex-col gap-4">
             <fieldset className="min-w-0 border-0 p-0">
               <legend className="mb-2 text-sm font-medium text-muted-foreground">Orientation</legend>
-              <div className="flex flex-wrap gap-3">
+              <div className="flex flex-col gap-2">
+                <div className="flex flex-wrap gap-3">
+                  <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-foreground">
+                    <input
+                      type="radio"
+                      name="sprite-orientation"
+                      value="horizontal"
+                      checked={orientation === 'horizontal'}
+                      onChange={() => setOrientation('horizontal')}
+                      className="accent-primary"
+                    />
+                    <span>Horizontale ➡️</span>
+                  </label>
+                  <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-foreground">
+                    <input
+                      type="radio"
+                      name="sprite-orientation"
+                      value="vertical"
+                      checked={orientation === 'vertical'}
+                      onChange={() => setOrientation('vertical')}
+                      className="accent-primary"
+                    />
+                    <span>Verticale ⬇️</span>
+                  </label>
+                </div>
                 <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-foreground">
                   <input
                     type="radio"
                     name="sprite-orientation"
-                    value="horizontal"
-                    checked={orientation === 'horizontal'}
-                    onChange={() => setOrientation('horizontal')}
+                    value="grid"
+                    checked={orientation === 'grid'}
+                    onChange={() => setOrientation('grid')}
                     className="accent-primary"
                   />
-                  <span>Horizontale ➡️</span>
-                </label>
-                <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-foreground">
-                  <input
-                    type="radio"
-                    name="sprite-orientation"
-                    value="vertical"
-                    checked={orientation === 'vertical'}
-                    onChange={() => setOrientation('vertical')}
-                    className="accent-primary"
-                  />
-                  <span>Verticale ⬇️</span>
+                  <span>Grille ⏹️</span>
                 </label>
               </div>
             </fieldset>
 
-            <label className="flex min-w-0 flex-col gap-1.5">
-              <span className="text-sm font-medium text-muted-foreground">Nombre d&apos;images</span>
-              <input
-                type="number"
-                min={1}
-                step={1}
-                className={inputBase}
-                value={framesInput}
-                onChange={(e) => setFramesInput(e.target.value)}
-              />
-            </label>
+            {orientation === 'grid' ? (
+              <div className="grid grid-cols-2 gap-3">
+                <label className="flex min-w-0 flex-col gap-1.5">
+                  <span className="text-sm font-medium text-muted-foreground">Colonnes</span>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    className={inputBase}
+                    value={columnsInput}
+                    onChange={(e) => setColumnsInput(e.target.value)}
+                  />
+                </label>
+                <label className="flex min-w-0 flex-col gap-1.5">
+                  <span className="text-sm font-medium text-muted-foreground">Rangées</span>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    className={inputBase}
+                    value={rowsInput}
+                    onChange={(e) => setRowsInput(e.target.value)}
+                  />
+                </label>
+              </div>
+            ) : (
+              <label className="flex min-w-0 flex-col gap-1.5">
+                <span className="text-sm font-medium text-muted-foreground">Nombre d&apos;images</span>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  className={inputBase}
+                  value={framesInput}
+                  onChange={(e) => setFramesInput(e.target.value)}
+                />
+              </label>
+            )}
           </div>
 
           <div className="flex flex-col gap-2">

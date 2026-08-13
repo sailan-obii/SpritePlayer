@@ -6,15 +6,39 @@ export function roundFrameSize(rawW, rawH) {
   };
 }
 
-export function computeFrameSize(naturalW, naturalH, frameCount, orientation) {
+/**
+ * @param {number} naturalW
+ * @param {number} naturalH
+ * @param {number} frameCount — utilisé pour horizontal / vertical
+ * @param {'horizontal'|'vertical'|'grid'} orientation
+ * @param {{ columns?: number, rows?: number }} [grid]
+ */
+export function computeFrameSize(naturalW, naturalH, frameCount, orientation, grid) {
+  if (orientation === 'grid') {
+    const columns = Math.max(1, grid?.columns ?? 1);
+    const rows = Math.max(1, grid?.rows ?? 1);
+    return roundFrameSize(naturalW / columns, naturalH / rows);
+  }
   if (orientation === 'horizontal') {
     return roundFrameSize(naturalW / frameCount, naturalH);
   }
   return roundFrameSize(naturalW, naturalH / frameCount);
 }
 
+/** Lecture grille : gauche → droite, puis rangée suivante (row-major). */
 export function getFrameSourceRect(config, index) {
-  const { frameW, frameH, orientation } = config;
+  const { frameW, frameH, orientation, columns } = config;
+  if (orientation === 'grid') {
+    const cols = Math.max(1, columns ?? 1);
+    const col = index % cols;
+    const row = Math.floor(index / cols);
+    return {
+      sx: col * frameW,
+      sy: row * frameH,
+      sw: frameW,
+      sh: frameH,
+    };
+  }
   return {
     sx: orientation === 'horizontal' ? index * frameW : 0,
     sy: orientation === 'vertical' ? index * frameH : 0,
