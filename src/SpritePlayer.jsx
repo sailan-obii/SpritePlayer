@@ -1,4 +1,13 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import {
+  clampOffset,
+  computeFrameSize,
+  drawIsolatedFrame,
+  formatOffsetLabel,
+  getStoredOffset,
+  hasNonZeroOffset,
+  nudgeStep,
+} from './frameRender';
 
 const ACCEPTED_TYPES = ['image/png', 'image/jpeg', 'image/jpg'];
 const FPS_MIN = 1;
@@ -242,13 +251,67 @@ const btnPrimary = cx(
 
 const btnSecondary = cx(
   btnBase,
-  'border-border bg-transparent text-foreground hover:border-primary/50 hover:bg-muted'
+  'border-transparent bg-muted text-foreground hover:bg-muted/80 hover:text-primary'
 );
 
 const btnIcon = 'min-w-9 px-0 py-2';
 
 const inputBase =
   'w-full rounded-xl border border-border bg-input px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-ring/30';
+
+const stepperBtn =
+  'min-w-[1.8rem] border-transparent bg-muted px-0 py-1 text-foreground hover:bg-muted/80 hover:text-primary';
+
+function AxisStepper({ axis, value, min, max, onChange, disabled }) {
+  const apply = (next, event) => {
+    event.stopPropagation();
+    onChange(clampOffset(next, Math.max(Math.abs(min), Math.abs(max))));
+  };
+
+  return (
+    <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+      <span>
+        {axis} :{' '}
+        <strong className="font-bold tabular-nums text-primary">{value}</strong>
+        <span className="text-muted-foreground"> px</span>
+      </span>
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          className={cx(btnBase, stepperBtn)}
+          disabled={disabled}
+          onClick={(e) => apply(value - nudgeStep(e.shiftKey), e)}
+          aria-label={`Diminuer ${axis}`}
+          title={`Diminuer ${axis} (Maj : 10 px)`}
+        >
+          –
+        </button>
+        <input
+          type="number"
+          min={min}
+          max={max}
+          step={1}
+          value={value}
+          disabled={disabled}
+          onChange={(e) => apply(e.target.value, e)}
+          onClick={(e) => e.stopPropagation()}
+          className={cx(inputBase, 'w-[3.2rem] py-1 text-center')}
+          aria-label={`Décalage ${axis} en pixels`}
+        />
+        <button
+          type="button"
+          className={cx(btnBase, stepperBtn)}
+          disabled={disabled}
+          onClick={(e) => apply(value + nudgeStep(e.shiftKey), e)}
+          aria-label={`Augmenter ${axis}`}
+          title={`Augmenter ${axis} (Maj : 10 px)`}
+        >
+          +
+        </button>
+      </div>
+    </label>
+  );
+}
 
 /**
  * Lecteur de sprite sheet en boucle (style GIF), sans backend.
@@ -265,16 +328,21 @@ export default function SpritePlayer() {
   const [isPaused, setIsPaused] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [appendEmptyFrame, setAppendEmptyFrame] = useState(false);
-  const [emptyFrameUseBgColor, setEmptyFrameUseBgColor] = useState(false);
-  const [emptyFrameBgColor, setEmptyFrameBgColor] = useState('#000000');
+  const [useBgColor, setUseBgColor] = useState(false);
+  const [bgColor, setBgColor] = useState('#000000');
   const [framesPerImageOverrides, setFramesPerImageOverrides] = useState({});
   /** Indices exclus de la boucle de lecture (soft-disable). */
   const [excludedFrames, setExcludedFrames] = useState({});
+  /** Décalage X/Y par index de frame. Les {x:0,y:0} ne sont pas stockés. */
+  const [frameOffsets, setFrameOffsets] = useState({});
+  const [positionPanelOpen, setPositionPanelOpen] = useState(false);
   const [flipX, setFlipX] = useState(false);
   const [error, setError] = useState('');
   const dragCounterRef = useRef(0);
   const fileInputRef = useRef(null);
   const timelineActiveTickRef = useRef(null);
+  const sheetImageRef = useRef(null);
+  const previewCanvasRef = useRef(null);
 
   const loadImageFile = useCallback((file) => {
     if (!isImageFile(file)) {
@@ -287,9 +355,11 @@ export default function SpritePlayer() {
     setIsPaused(false);
     setFramesPerImageOverrides({});
     setExcludedFrames({});
+    setFrameOffsets({});
+    setPositionPanelOpen(false);
     setFlipX(false);
-    setEmptyFrameUseBgColor(false);
-    setEmptyFrameBgColor('#000000');
+    setUseBgColor(false);
+    setBgColor('#000000');
     setNaturalSize({ w: 0, h: 0 });
 
     const reader = new FileReader();
@@ -366,15 +436,7 @@ export default function SpritePlayer() {
       return;
     }
 
-    let frameW;
-    let frameH;
-    if (orientation === 'horizontal') {
-      frameW = naturalSize.w / n;
-      frameH = naturalSize.h;
-    } else {
-      frameW = naturalSize.w;
-      frameH = naturalSize.h / n;
-    }
+    const { frameW, frameH } = computeFrameSize(naturalSize.w, naturalSize.h, n, orientation);
 
     if (!Number.isFinite(frameW) || !Number.isFinite(frameH) || frameW < 1 || frameH < 1) {
       setError('Dimensions de frame invalides.');
@@ -393,6 +455,8 @@ export default function SpritePlayer() {
     setIsPaused(false);
     setFramesPerImageOverrides({});
     setExcludedFrames({});
+    setFrameOffsets({});
+    setPositionPanelOpen(false);
   }, [imageSrc, naturalSize, framesInput, orientation]);
 
   const playbackFrameCount = config
@@ -453,6 +517,12 @@ export default function SpritePlayer() {
         });
         setExcludedFrames((prev) => {
           if (!isExcludedIndex(prev, config.frames)) return prev;
+          const next = { ...prev };
+          delete next[config.frames];
+          return next;
+        });
+        setFrameOffsets((prev) => {
+          if (!hasNonZeroOffset(prev, config.frames)) return prev;
           const next = { ...prev };
           delete next[config.frames];
           return next;
@@ -571,6 +641,84 @@ export default function SpritePlayer() {
     setFlipX((prev) => !prev);
   }, []);
 
+  const canOffsetCurrentFrame =
+    Boolean(config) &&
+    isPaused &&
+    !isEmptyFrame &&
+    !isCurrentExcluded;
+
+  useEffect(() => {
+    if (!canOffsetCurrentFrame) setPositionPanelOpen(false);
+  }, [canOffsetCurrentFrame]);
+
+  const currentOffset = useMemo(() => {
+    if (!canOffsetCurrentFrame) return { x: 0, y: 0 };
+    return getStoredOffset(frameOffsets, frameIndex);
+  }, [canOffsetCurrentFrame, frameOffsets, frameIndex]);
+
+  const previewOffset = useMemo(() => {
+    if (!config || isEmptyFrame || isCurrentExcluded) return { x: 0, y: 0 };
+    return getStoredOffset(frameOffsets, frameIndex);
+  }, [config, isEmptyFrame, isCurrentExcluded, frameOffsets, frameIndex]);
+
+  const setCurrentOffset = useCallback(
+    (x, y) => {
+      if (!config || isEmptyFrame || isCurrentExcluded) return;
+      const nextX = clampOffset(x, config.frameW);
+      const nextY = clampOffset(y, config.frameH);
+      setFrameOffsets((prev) => {
+        const next = { ...prev };
+        if (nextX === 0 && nextY === 0) {
+          delete next[frameIndex];
+        } else {
+          next[frameIndex] = { x: nextX, y: nextY };
+        }
+        return next;
+      });
+    },
+    [config, isEmptyFrame, isCurrentExcluded, frameIndex]
+  );
+
+  const nudgeCurrentOffset = useCallback(
+    (dx, dy) => {
+      const { x, y } = getStoredOffset(frameOffsets, frameIndex);
+      setCurrentOffset(x + dx, y + dy);
+    },
+    [frameOffsets, frameIndex, setCurrentOffset]
+  );
+
+  const resetCurrentOffset = useCallback(
+    (e) => {
+      e?.stopPropagation?.();
+      setCurrentOffset(0, 0);
+    },
+    [setCurrentOffset]
+  );
+
+  const resetAllFrameOffsets = useCallback(() => {
+    setFrameOffsets({});
+  }, []);
+
+  const offsetEntries = useMemo(() => {
+    if (!config) return [];
+    return Object.keys(frameOffsets)
+      .map((key) => Number(key))
+      .filter(
+        (index) =>
+          Number.isFinite(index) &&
+          index >= 0 &&
+          index < playbackFrameCount &&
+          hasNonZeroOffset(frameOffsets, index) &&
+          !isExcludedIndex(excludedFrames, index) &&
+          !(appendEmptyFrame && index >= config.frames)
+      )
+      .sort((a, b) => a - b)
+      .map((index) => ({
+        index,
+        offset: getStoredOffset(frameOffsets, index),
+      }));
+  }, [frameOffsets, config, playbackFrameCount, excludedFrames, appendEmptyFrame]);
+
   const overrideEntries = useMemo(() => {
     if (!config) return [];
     return Object.entries(framesPerImageOverrides)
@@ -629,6 +777,23 @@ export default function SpritePlayer() {
         return;
       }
 
+      if (
+        e.shiftKey &&
+        (e.key === 'ArrowLeft' ||
+          e.key === 'ArrowRight' ||
+          e.key === 'ArrowUp' ||
+          e.key === 'ArrowDown')
+      ) {
+        e.preventDefault();
+        if (!canOffsetCurrentFrame) return;
+        const step = 10;
+        if (e.key === 'ArrowLeft') nudgeCurrentOffset(-step, 0);
+        if (e.key === 'ArrowRight') nudgeCurrentOffset(step, 0);
+        if (e.key === 'ArrowUp') nudgeCurrentOffset(0, -step);
+        if (e.key === 'ArrowDown') nudgeCurrentOffset(0, step);
+        return;
+      }
+
       if (e.key === 'ArrowLeft') {
         e.preventDefault();
         goPrevFrame();
@@ -640,7 +805,7 @@ export default function SpritePlayer() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [config, isPaused, goPrevFrame, goNextFrame]);
+  }, [config, isPaused, goPrevFrame, goNextFrame, canOffsetCurrentFrame, nudgeCurrentOffset]);
 
   useEffect(() => {
     if (!config) return;
@@ -651,14 +816,6 @@ export default function SpritePlayer() {
     });
   }, [config, frameIndex]);
 
-  const backgroundPosition = useMemo(() => {
-    if (!config || isEmptyFrame) return '0 0';
-    if (config.orientation === 'horizontal') {
-      return `${-(frameIndex * config.frameW)}px 0`;
-    }
-    return `0 ${-(frameIndex * config.frameH)}px`;
-  }, [config, frameIndex, isEmptyFrame]);
-
   const frameBoxStyle = useMemo(() => {
     if (!config) return undefined;
     return {
@@ -667,21 +824,29 @@ export default function SpritePlayer() {
     };
   }, [config]);
 
-  const emptyFrameStyle = useMemo(() => {
-    if (!frameBoxStyle) return undefined;
-    if (!emptyFrameUseBgColor) return frameBoxStyle;
-    return {
-      ...frameBoxStyle,
-      backgroundColor: emptyFrameBgColor,
-    };
-  }, [frameBoxStyle, emptyFrameUseBgColor, emptyFrameBgColor]);
+  const fillColor = useBgColor ? bgColor : null;
 
-  const handleEmptyFrameBgColorChange = useCallback((e) => {
-    setEmptyFrameBgColor(e.target.value);
-    setEmptyFrameUseBgColor(true);
+  useEffect(() => {
+    const canvas = previewCanvasRef.current;
+    if (!canvas || !config) return;
+    drawIsolatedFrame(canvas, {
+      image: sheetImageRef.current,
+      config,
+      frameIndex,
+      offsetX: previewOffset.x,
+      offsetY: previewOffset.y,
+      fillColor,
+      flipX,
+      isEmpty: isEmptyFrame,
+    });
+  }, [config, frameIndex, previewOffset, fillColor, flipX, isEmptyFrame, imageSrc, naturalSize]);
+
+  const handleBgColorChange = useCallback((e) => {
+    setBgColor(e.target.value);
+    setUseBgColor(true);
   }, []);
 
-  const handleEmptyFrameEyedropper = useCallback(async () => {
+  const handleBgEyedropper = useCallback(async () => {
     if (!window.EyeDropper) {
       setError('La pipette n’est pas prise en charge par ce navigateur (Chrome ou Edge recommandé).');
       return;
@@ -689,8 +854,8 @@ export default function SpritePlayer() {
     try {
       const dropper = new window.EyeDropper();
       const { sRGBHex } = await dropper.open();
-      setEmptyFrameBgColor(sRGBHex);
-      setEmptyFrameUseBgColor(true);
+      setBgColor(sRGBHex);
+      setUseBgColor(true);
       setError('');
     } catch {
       /* annulation par l’utilisateur */
@@ -701,26 +866,6 @@ export default function SpritePlayer() {
     () => (flipX ? { transform: 'scaleX(-1)' } : undefined),
     [flipX]
   );
-
-  const previewStyle = useMemo(() => {
-    if (!imageSrc || !config || isEmptyFrame) return undefined;
-    return {
-      ...frameBoxStyle,
-      backgroundImage: `url(${imageSrc})`,
-      backgroundSize: `${config.fullW}px ${config.fullH}px`,
-      backgroundPosition,
-      backgroundRepeat: 'no-repeat',
-      ...flipTransformStyle,
-    };
-  }, [imageSrc, config, isEmptyFrame, frameBoxStyle, backgroundPosition, flipTransformStyle]);
-
-  const emptyFramePreviewStyle = useMemo(() => {
-    if (!emptyFrameStyle) return undefined;
-    return {
-      ...emptyFrameStyle,
-      ...flipTransformStyle,
-    };
-  }, [emptyFrameStyle, flipTransformStyle]);
 
   return (
     <div
@@ -866,49 +1011,39 @@ export default function SpritePlayer() {
             />
             <span>Image vide en fin d&apos;animation</span>
           </label>
-          {appendEmptyFrame && (
-            <div className="ml-1 border-l border-border pl-3">
-              <label className="mb-2 flex cursor-pointer items-center gap-2 text-sm text-foreground">
-                <input
-                  type="checkbox"
-                  checked={emptyFrameUseBgColor}
-                  onChange={(e) => setEmptyFrameUseBgColor(e.target.checked)}
-                  className="accent-primary"
-                />
-                <span>Couleur de fond personnalisée</span>
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="color"
-                  value={emptyFrameBgColor}
-                  onChange={handleEmptyFrameBgColorChange}
-                  className="h-9 w-12 cursor-pointer rounded-lg border border-border bg-input p-1 disabled:cursor-not-allowed disabled:opacity-45"
-                  disabled={!emptyFrameUseBgColor}
-                  aria-label="Couleur de fond de l’image vide"
-                />
-                <button
-                  type="button"
-                  className={cx(btnSecondary, btnIcon)}
-                  onClick={handleEmptyFrameEyedropper}
-                  disabled={!emptyFrameUseBgColor}
-                  title="Pipette : prélever une couleur à l’écran"
-                  aria-label="Pipette : prélever une couleur à l’écran"
-                >
-                  <IconEyedropper />
-                </button>
-                <button
-                  type="button"
-                  className={cx(btnSecondary, btnIcon)}
-                  onClick={() => setEmptyFrameUseBgColor(false)}
-                  disabled={!emptyFrameUseBgColor}
-                  title="Fond transparent"
-                  aria-label="Fond transparent"
-                >
-                  <IconTransparent />
-                </button>
-              </div>
+          <div className="ml-0">
+            <p className="mb-2 text-sm font-medium text-muted-foreground">
+              Fond des zones découvertes
+            </p>
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                value={bgColor}
+                onChange={handleBgColorChange}
+                className="h-9 w-12 cursor-pointer rounded-lg border border-border bg-input p-1"
+                aria-label="Couleur de fond des zones découvertes"
+              />
+              <button
+                type="button"
+                className={cx(btnSecondary, btnIcon)}
+                onClick={handleBgEyedropper}
+                title="Pipette : prélever une couleur à l’écran"
+                aria-label="Pipette : prélever une couleur à l’écran"
+              >
+                <IconEyedropper />
+              </button>
+              <button
+                type="button"
+                className={cx(btnSecondary, btnIcon)}
+                onClick={() => setUseBgColor(false)}
+                disabled={!useBgColor}
+                title="Fond transparent"
+                aria-label="Fond transparent"
+              >
+                <IconTransparent />
+              </button>
             </div>
-          )}
+          </div>
         </section>
       </div>
 
@@ -952,20 +1087,22 @@ export default function SpritePlayer() {
             </p>
           )}
           {config && frameBoxStyle ? (
-            isEmptyFrame ? (
-              <div
-                className="sp-pixel shrink-0"
-                style={emptyFramePreviewStyle}
-                aria-label="Image vide"
-                onClick={(e) => e.stopPropagation()}
+            <div
+              className={cx(
+                'sp-pixel shrink-0 overflow-hidden',
+                !useBgColor && 'sp-checkerboard'
+              )}
+              style={frameBoxStyle}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <canvas
+                ref={previewCanvasRef}
+                width={config.frameW}
+                height={config.frameH}
+                className="sp-pixel block"
+                aria-label={isEmptyFrame ? 'Image vide' : 'Aperçu de la frame'}
               />
-            ) : (
-              <div
-                className="sp-pixel shrink-0"
-                style={previewStyle}
-                onClick={(e) => e.stopPropagation()}
-              />
-            )
+            </div>
           ) : imageSrc ? (
             <>
               <img
@@ -1000,6 +1137,19 @@ export default function SpritePlayer() {
               </button>
             </div>
           )}
+          {config && (
+            <p
+              className="pointer-events-none absolute bottom-2 left-2.5 m-0 rounded bg-background/75 px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground"
+              aria-live="polite"
+            >
+              {isCurrentExcluded
+                ? `${getFrameLabel(frameIndex, config, appendEmptyFrame)} · retirée`
+                : isEmptyFrame
+                  ? `Vide · ${activePosition + 1} / ${activePlaybackCount}`
+                  : `Image ${activePosition + 1} / ${activePlaybackCount}`}
+              {isPaused ? ' · en pause' : ''}
+            </p>
+          )}
           {naturalSize.w > 0 && (
             <p className="pointer-events-none absolute right-2.5 bottom-2 m-0 rounded bg-background/75 px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground">
               {naturalSize.w} × {naturalSize.h} px
@@ -1028,6 +1178,10 @@ export default function SpritePlayer() {
                 const isActive = index === frameIndex;
                 const isEmptyTick = appendEmptyFrame && index >= config.frames;
                 const hasOverride = framesPerImageOverrides[index] != null;
+                const hasOffset =
+                  hasNonZeroOffset(frameOffsets, index) &&
+                  !isExcludedIndex(excludedFrames, index) &&
+                  !isEmptyTick;
                 const isExcluded = isExcludedIndex(excludedFrames, index);
                 const label = isEmptyTick ? 'V' : String(index + 1);
                 const fullLabel = getFrameLabel(index, config, appendEmptyFrame);
@@ -1099,6 +1253,15 @@ export default function SpritePlayer() {
                         aria-hidden
                       />
                     )}
+                    {hasOffset && (
+                      <span
+                        className={cx(
+                          'absolute bottom-[3px] left-[3px] size-[5px] rounded-[1px] shadow-[0_0_0_1px_rgba(0,0,0,0.35)]',
+                          isActive ? 'bg-primary-foreground' : 'bg-primary'
+                        )}
+                        aria-hidden
+                      />
+                    )}
                   </button>
                 );
               })}
@@ -1107,155 +1270,219 @@ export default function SpritePlayer() {
         )}
         {config && (
           <div
-            className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-transport px-4 py-2.5"
+            className="border-t border-border bg-transport"
             role="toolbar"
             aria-label="Contrôles de lecture"
           >
-            <div className="flex min-w-[min(100%,220px)] flex-1 flex-wrap items-end gap-x-5 gap-y-2.5">
-              <span
-                className="rounded-full border border-white/10 bg-black/25 px-2.5 py-1 text-xs font-medium tabular-nums text-muted-foreground"
-                aria-live="polite"
-              >
-                {isCurrentExcluded
-                  ? `${getFrameLabel(frameIndex, config, appendEmptyFrame)} · retirée`
-                  : isEmptyFrame
-                    ? `Vide · ${activePosition + 1} / ${activePlaybackCount}`
-                    : `Image ${activePosition + 1} / ${activePlaybackCount}`}
-                {isPaused ? ' · en pause' : ''}
-              </span>
+            <div className="flex flex-wrap items-start gap-y-3 px-4 py-3">
               {isPaused && (
-                <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                  <span>
-                    Frame Time :{' '}
-                    <strong className="font-bold tabular-nums text-primary">
-                      {currentFramesPerImage} frame{currentFramesPerImage > 1 ? 's' : ''}
-                    </strong>{' '}
-                    <span className="text-muted-foreground">({currentDurationSec} s)</span>
+                <div className="flex flex-col gap-1.5 pr-4">
+                  <span className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                    Durée
                   </span>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      className={cx(
-                        btnBase,
-                        'min-w-[1.8rem] border-border bg-muted px-0 py-1 text-foreground hover:border-primary/50 hover:bg-muted/80'
-                      )}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const value = Math.max(FRAMES_PER_IMAGE_MIN, currentFramesPerImage - 1);
-                        handleFrameFramesPerImageOverrideChange({ target: { value } });
-                      }}
-                      aria-label="Diminuer Frame Time"
-                    >
-                      –
-                    </button>
-                    <input
-                      type="number"
-                      min={FRAMES_PER_IMAGE_MIN}
-                      max={FRAMES_PER_IMAGE_MAX}
-                      step={1}
-                      value={currentFramesPerImage}
-                      onChange={handleFrameFramesPerImageOverrideChange}
-                      onClick={(e) => e.stopPropagation()}
-                      className={cx(inputBase, 'w-[3.2rem] py-1 text-center')}
-                      aria-label={`Temps par image en frames de ${getFrameLabel(frameIndex, config, appendEmptyFrame)}`}
-                    />
-                    <button
-                      type="button"
-                      className={cx(
-                        btnBase,
-                        'min-w-[1.8rem] border-border bg-muted px-0 py-1 text-foreground hover:border-primary/50 hover:bg-muted/80'
-                      )}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const value = Math.min(FRAMES_PER_IMAGE_MAX, currentFramesPerImage + 1);
-                        handleFrameFramesPerImageOverrideChange({ target: { value } });
-                      }}
-                      aria-label="Augmenter Frame Time"
-                    >
-                      +
-                    </button>
-                  </div>
-                </label>
+                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                    <span>
+                      Frame Time :{' '}
+                      <strong className="font-bold tabular-nums text-primary">
+                        {currentFramesPerImage} frame{currentFramesPerImage > 1 ? 's' : ''}
+                      </strong>{' '}
+                      <span className="text-muted-foreground">({currentDurationSec} s)</span>
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        className={cx(btnBase, stepperBtn)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const value = Math.max(FRAMES_PER_IMAGE_MIN, currentFramesPerImage - 1);
+                          handleFrameFramesPerImageOverrideChange({ target: { value } });
+                        }}
+                        aria-label="Diminuer Frame Time"
+                      >
+                        –
+                      </button>
+                      <input
+                        type="number"
+                        min={FRAMES_PER_IMAGE_MIN}
+                        max={FRAMES_PER_IMAGE_MAX}
+                        step={1}
+                        value={currentFramesPerImage}
+                        onChange={handleFrameFramesPerImageOverrideChange}
+                        onClick={(e) => e.stopPropagation()}
+                        className={cx(inputBase, 'w-[3.2rem] py-1 text-center')}
+                        aria-label={`Temps par image en frames de ${getFrameLabel(frameIndex, config, appendEmptyFrame)}`}
+                      />
+                      <button
+                        type="button"
+                        className={cx(btnBase, stepperBtn)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const value = Math.min(FRAMES_PER_IMAGE_MAX, currentFramesPerImage + 1);
+                          handleFrameFramesPerImageOverrideChange({ target: { value } });
+                        }}
+                        aria-label="Augmenter Frame Time"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </label>
+                </div>
               )}
               {isPaused && (
-                <button
-                  type="button"
-                  className={cx(
-                    btnSecondary,
-                    'text-xs',
-                    isCurrentExcluded && 'border-primary/50 text-primary'
-                  )}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleCurrentFrameExcluded();
-                  }}
-                  disabled={!canExcludeCurrentFrame}
-                  title={
-                    isCurrentExcluded
-                      ? 'Remettre cette image dans la boucle'
-                      : canExcludeCurrentFrame
-                        ? 'Retirer cette image de la boucle (sans modifier la feuille)'
-                        : 'Impossible de retirer la dernière image active'
-                  }
-                  aria-pressed={isCurrentExcluded}
-                  aria-label={
-                    isCurrentExcluded
-                      ? 'Remettre dans l’animation'
-                      : 'Retirer de l’animation'
-                  }
-                >
-                  {isCurrentExcluded ? 'Remettre dans l’animation' : 'Retirer de l’animation'}
-                </button>
+                <div className="flex flex-col gap-1.5 border-l border-border px-4">
+                  <span className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                    Image
+                  </span>
+                  <button
+                    type="button"
+                    className={cx(
+                      btnSecondary,
+                      'h-[2.125rem] text-xs',
+                      isCurrentExcluded && 'text-primary'
+                    )}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleCurrentFrameExcluded();
+                    }}
+                    disabled={!canExcludeCurrentFrame}
+                    title={
+                      isCurrentExcluded
+                        ? 'Remettre cette image dans la boucle'
+                        : canExcludeCurrentFrame
+                          ? 'Retirer cette image de la boucle (sans modifier la feuille)'
+                          : 'Impossible de retirer la dernière image active'
+                    }
+                    aria-pressed={isCurrentExcluded}
+                    aria-label={
+                      isCurrentExcluded
+                        ? 'Remettre dans l’animation'
+                        : 'Retirer de l’animation'
+                    }
+                  >
+                    {isCurrentExcluded ? 'Remettre dans l’animation' : 'Retirer de l’animation'}
+                  </button>
+                </div>
               )}
+              <div
+                className={cx(
+                  'ml-auto flex flex-col gap-1.5',
+                  isPaused && 'border-l border-border pl-4'
+                )}
+              >
+                <span className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                  Navigation
+                </span>
+                <div className="flex overflow-hidden rounded-full bg-muted">
+                  <button
+                    type="button"
+                    className="inline-flex size-10 items-center justify-center text-foreground transition-colors hover:bg-black/20 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                    onClick={goToStart}
+                    title="Première image"
+                    aria-label="Première image"
+                  >
+                    <IconTransportStart />
+                  </button>
+                  <button
+                    type="button"
+                    className="inline-flex size-10 items-center justify-center text-foreground transition-colors hover:bg-black/20 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                    onClick={goPrevFrame}
+                    title="Image précédente"
+                    aria-label="Image précédente"
+                  >
+                    <IconTransportPrev />
+                  </button>
+                  <button
+                    type="button"
+                    className="inline-flex size-10 items-center justify-center bg-primary text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                    onClick={togglePause}
+                    aria-pressed={!isPaused}
+                    title={isPaused ? 'Lecture' : 'Pause'}
+                    aria-label={isPaused ? 'Lecture' : 'Pause'}
+                  >
+                    {isPaused ? <IconTransportPlay /> : <IconTransportPause />}
+                  </button>
+                  <button
+                    type="button"
+                    className="inline-flex size-10 items-center justify-center text-foreground transition-colors hover:bg-black/20 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                    onClick={goNextFrame}
+                    title="Image suivante"
+                    aria-label="Image suivante"
+                  >
+                    <IconTransportNext />
+                  </button>
+                  <button
+                    type="button"
+                    className="inline-flex size-10 items-center justify-center text-foreground transition-colors hover:bg-black/20 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                    onClick={goToEnd}
+                    title="Dernière image"
+                    aria-label="Dernière image"
+                  >
+                    <IconTransportEnd />
+                  </button>
+                </div>
+              </div>
             </div>
-            <div className="flex overflow-hidden rounded-full border border-border bg-muted">
-              <button
-                type="button"
-                className="inline-flex size-10 items-center justify-center text-foreground transition-colors hover:bg-primary/15 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                onClick={goToStart}
-                title="Première image"
-                aria-label="Première image"
-              >
-                <IconTransportStart />
-              </button>
-              <button
-                type="button"
-                className="inline-flex size-10 items-center justify-center text-foreground transition-colors hover:bg-primary/15 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                onClick={goPrevFrame}
-                title="Image précédente"
-                aria-label="Image précédente"
-              >
-                <IconTransportPrev />
-              </button>
-              <button
-                type="button"
-                className="inline-flex size-10 items-center justify-center bg-primary text-primary-foreground transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                onClick={togglePause}
-                aria-pressed={!isPaused}
-                title={isPaused ? 'Lecture' : 'Pause'}
-                aria-label={isPaused ? 'Lecture' : 'Pause'}
-              >
-                {isPaused ? <IconTransportPlay /> : <IconTransportPause />}
-              </button>
-              <button
-                type="button"
-                className="inline-flex size-10 items-center justify-center text-foreground transition-colors hover:bg-primary/15 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                onClick={goNextFrame}
-                title="Image suivante"
-                aria-label="Image suivante"
-              >
-                <IconTransportNext />
-              </button>
-              <button
-                type="button"
-                className="inline-flex size-10 items-center justify-center text-foreground transition-colors hover:bg-primary/15 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                onClick={goToEnd}
-                title="Dernière image"
-                aria-label="Dernière image"
-              >
-                <IconTransportEnd />
-              </button>
-            </div>
+            {isPaused && canOffsetCurrentFrame && (
+              <div className="border-t border-border px-4 py-2.5">
+                <div className="flex justify-center">
+                  <button
+                    type="button"
+                    className={cx(
+                      btnSecondary,
+                      'h-[2.125rem] min-w-[8.5rem] text-xs',
+                      (positionPanelOpen || currentOffset.x !== 0 || currentOffset.y !== 0) &&
+                        'text-primary'
+                    )}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPositionPanelOpen((open) => !open);
+                    }}
+                    aria-expanded={positionPanelOpen}
+                    aria-controls="frame-position-panel"
+                    title="Modifier la position de cette image"
+                  >
+                    Position
+                    <span className="text-[0.65rem] opacity-80" aria-hidden>
+                      {positionPanelOpen ? '▴' : '▾'}
+                    </span>
+                  </button>
+                </div>
+                {positionPanelOpen && (
+                  <div
+                    id="frame-position-panel"
+                    className="mt-2.5 grid grid-cols-[1fr_1fr_1fr] items-end gap-x-4 mb-5"
+                  >
+                    <div className="flex justify-center">
+                      <AxisStepper
+                        axis="X"
+                        value={currentOffset.x}
+                        min={-config.frameW}
+                        max={config.frameW}
+                        onChange={(x) => setCurrentOffset(x, currentOffset.y)}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      className={cx(btnSecondary, 'h-[2.125rem] text-xs')}
+                      onClick={resetCurrentOffset}
+                      disabled={currentOffset.x === 0 && currentOffset.y === 0}
+                      title="Remettre cette image à X0 Y0"
+                    >
+                      Réinit.
+                    </button>
+                    <div className="flex justify-center">
+                      <AxisStepper
+                        axis="Y"
+                        value={currentOffset.y}
+                        min={-config.frameH}
+                        max={config.frameH}
+                        onChange={(y) => setCurrentOffset(currentOffset.x, y)}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </section>
@@ -1320,7 +1547,7 @@ export default function SpritePlayer() {
 
       {config && overrideEntries.length > 0 && (
         <section
-          className="sp-panel p-5 sm:p-6"
+          className="sp-panel mb-4 p-5 sm:p-6"
           aria-label="Surcharges de Frame Time"
         >
           <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-[0.14em] text-primary">
@@ -1358,9 +1585,50 @@ export default function SpritePlayer() {
         </section>
       )}
 
+      {config && offsetEntries.length > 0 && (
+        <section
+          className="sp-panel p-5 sm:p-6"
+          aria-label="Décalages de frames"
+        >
+          <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-[0.14em] text-primary">
+            Décalages
+          </h2>
+          <ul className="m-0 mb-3 flex list-none flex-wrap gap-2 p-0">
+            {offsetEntries.map(({ index, offset }) => (
+              <li key={index}>
+                <button
+                  type="button"
+                  className={cx(
+                    'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+                    frameIndex === index && isPaused
+                      ? 'border-primary bg-primary text-primary-foreground'
+                      : 'border-border bg-muted text-foreground hover:border-primary/40'
+                  )}
+                  onClick={() => goToFrameAndPause(index)}
+                  title={`Afficher ${getFrameLabel(index, config, appendEmptyFrame)} et mettre en pause`}
+                >
+                  <span>{getFrameLabel(index, config, appendEmptyFrame)}</span>
+                  <span className="tabular-nums opacity-80">
+                    {formatOffsetLabel(offset)}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            className={btnSecondary}
+            onClick={resetAllFrameOffsets}
+          >
+            Tout réinitialiser
+          </button>
+        </section>
+      )}
+
       {/* Image cachée pour lire naturalWidth / naturalHeight */}
       {imageSrc && (
         <img
+          ref={sheetImageRef}
           src={imageSrc}
           alt=""
           className="pointer-events-none absolute -left-[9999px] h-px w-px opacity-0"
