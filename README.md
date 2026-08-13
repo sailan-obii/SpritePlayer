@@ -2,6 +2,8 @@
 
 🌐 **Site déployé :** [https://sailan_obii.github.io/SpritePlayer/](https://sailan-obii.github.io/SpritePlayer/)
 
+![Aperçu de SpritePlayer](docs/spriteplayer-preview.png)
+
 Petit outil web pour prévisualiser une **sprite sheet** (PNG ou JPEG) en **boucle**, comme un GIF animé. Tout s’exécute **dans le navigateur** : aucun serveur ni upload de fichiers n’est requis.
 
 ## Déploiement

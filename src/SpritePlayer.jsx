@@ -869,11 +869,11 @@ export default function SpritePlayer() {
 
   return (
     <div
-      className="mx-auto box-border min-h-screen max-w-[960px] px-5 py-6 pb-8 text-foreground sm:px-6"
+      className="mx-auto box-border min-h-screen max-w-[1440px] px-4 py-6 pb-8 text-foreground sm:px-6"
       role="region"
       aria-label="Lecteur de sprite sheet"
     >
-      <header className="mb-5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+      <header className="mb-5 flex flex-wrap items-baseline justify-center gap-x-3 gap-y-1 text-center">
         <h1 className="font-display text-xl font-bold tracking-tight text-foreground sm:text-2xl">
           SpritePlayer
         </h1>
@@ -891,11 +891,21 @@ export default function SpritePlayer() {
         </p>
       )}
 
-      <div className="mb-4 grid gap-4 md:grid-cols-2">
-        <section className="sp-panel p-5 sm:p-6">
+      <div
+        className={cx(
+          'grid gap-4 lg:items-start',
+          excludedEntries.length > 0 ||
+            overrideEntries.length > 0 ||
+            offsetEntries.length > 0
+            ? 'lg:grid-cols-[minmax(220px,260px)_minmax(0,1fr)_minmax(220px,260px)]'
+            : 'lg:grid-cols-[minmax(220px,260px)_minmax(0,1fr)]'
+        )}
+      >
+        <aside className="order-2 flex flex-col gap-4 lg:order-1 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto lg:[scrollbar-width:thin]">
+        <section className="sp-panel p-4 sm:p-5">
           <SectionTitle icon={<IconSpriteSheet />}>Feuille de sprites</SectionTitle>
 
-          <div className="mb-4 grid gap-4 sm:grid-cols-[1.2fr_0.8fr]">
+          <div className="mb-4 flex flex-col gap-4">
             <fieldset className="min-w-0 border-0 p-0">
               <legend className="mb-2 text-sm font-medium text-muted-foreground">Orientation</legend>
               <div className="flex flex-wrap gap-3">
@@ -937,14 +947,15 @@ export default function SpritePlayer() {
             </label>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <button type="button" className={cx(btnPrimary, 'w-full sm:w-auto')} onClick={handleValidate}>
+          <div className="flex flex-col gap-2">
+            <button type="button" className={cx(btnPrimary, 'w-full')} onClick={handleValidate}>
               Valider &amp; Lancer
             </button>
             <button
               type="button"
               className={cx(
                 btnSecondary,
+                'w-full',
                 flipX && 'border-primary bg-muted text-primary'
               )}
               onClick={toggleFlipX}
@@ -959,7 +970,7 @@ export default function SpritePlayer() {
           </div>
         </section>
 
-        <section className="sp-panel p-5 sm:p-6">
+        <section className="sp-panel p-4 sm:p-5">
           <SectionTitle icon={<IconSpeed />}>Vitesse</SectionTitle>
           <div className="mb-3 grid grid-cols-[1fr_auto] gap-x-4 gap-y-1.5">
             <span className="text-sm font-medium text-muted-foreground">
@@ -1045,15 +1056,16 @@ export default function SpritePlayer() {
             </div>
           </div>
         </section>
-      </div>
+        </aside>
 
+        <div className="order-1 min-w-0 lg:order-2">
       <section
-        className="sp-panel mb-4 overflow-hidden"
+        className="sp-panel overflow-hidden"
         aria-label="Aperçu animation"
       >
         <div
           className={cx(
-            'relative flex min-h-[220px] cursor-pointer items-center justify-center p-5 transition-[background,box-shadow]',
+            'relative flex min-h-[min(320px,50vh)] cursor-pointer items-center justify-center p-5 transition-[background,box-shadow]',
             'bg-preview',
             !imageSrc && 'rounded-xl border-2 border-dashed border-border bg-background hover:border-primary/40 hover:bg-muted/40',
             isDragging && 'bg-primary/10 shadow-[inset_0_0_0_2px_var(--color-primary)]'
@@ -1495,144 +1507,146 @@ export default function SpritePlayer() {
           </div>
         )}
       </section>
+        </div>
 
-      {config && excludedEntries.length > 0 && (
-        <section
-          className="sp-panel mb-4 p-5 sm:p-6"
-          aria-label="Images retirées de l’animation"
-        >
-          <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-[0.14em] text-primary">
-            Images retirées
-          </h2>
-          <ul className="m-0 mb-3 flex list-none flex-wrap gap-2 p-0">
-            {excludedEntries.map((index) => (
-              <li key={index}>
+        {(excludedEntries.length > 0 ||
+          overrideEntries.length > 0 ||
+          offsetEntries.length > 0) && (
+          <aside className="order-3 flex flex-col gap-4 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto lg:[scrollbar-width:thin]">
+            {excludedEntries.length > 0 && (
+              <section
+                className="sp-panel p-4 sm:p-5"
+                aria-label="Images retirées de l’animation"
+              >
+                <SectionTitle>Images retirées</SectionTitle>
+                <ul className="m-0 mb-3 flex list-none flex-wrap gap-2 p-0">
+                  {excludedEntries.map((index) => (
+                    <li key={index}>
+                      <button
+                        type="button"
+                        className={cx(
+                          'relative inline-flex items-center gap-2 overflow-hidden rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+                          frameIndex === index && isPaused
+                            ? 'border-primary bg-primary text-primary-foreground'
+                            : 'border-border bg-muted text-foreground hover:border-primary/40'
+                        )}
+                        onClick={() => goToFrameAndPause(index)}
+                        title={`Afficher ${getFrameLabel(index, config, appendEmptyFrame)} et mettre en pause`}
+                      >
+                        <span>{getFrameLabel(index, config, appendEmptyFrame)}</span>
+                        <span
+                          className="pointer-events-none absolute inset-0"
+                          aria-hidden
+                        >
+                          <svg
+                            className="absolute inset-0 size-full"
+                            viewBox="0 0 96 28"
+                            preserveAspectRatio="none"
+                          >
+                            <line
+                              x1="8"
+                              y1="22"
+                              x2="88"
+                              y2="6"
+                              stroke="currentColor"
+                              strokeWidth="1.75"
+                              strokeLinecap="round"
+                              opacity="0.55"
+                            />
+                          </svg>
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
                 <button
                   type="button"
-                  className={cx(
-                    'relative inline-flex items-center gap-2 overflow-hidden rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
-                    frameIndex === index && isPaused
-                      ? 'border-primary bg-primary text-primary-foreground'
-                      : 'border-border bg-muted text-foreground hover:border-primary/40'
-                  )}
-                  onClick={() => goToFrameAndPause(index)}
-                  title={`Afficher ${getFrameLabel(index, config, appendEmptyFrame)} et mettre en pause`}
+                  className={cx(btnSecondary, 'w-full')}
+                  onClick={restoreAllExcludedFrames}
                 >
-                  <span>{getFrameLabel(index, config, appendEmptyFrame)}</span>
-                  <span
-                    className="pointer-events-none absolute inset-0"
-                    aria-hidden
-                  >
-                    <svg
-                      className="absolute inset-0 size-full"
-                      viewBox="0 0 96 28"
-                      preserveAspectRatio="none"
-                    >
-                      <line
-                        x1="8"
-                        y1="22"
-                        x2="88"
-                        y2="6"
-                        stroke="currentColor"
-                        strokeWidth="1.75"
-                        strokeLinecap="round"
-                        opacity="0.55"
-                      />
-                    </svg>
-                  </span>
+                  Tout réintégrer
                 </button>
-              </li>
-            ))}
-          </ul>
-          <button
-            type="button"
-            className={btnSecondary}
-            onClick={restoreAllExcludedFrames}
-          >
-            Tout réintégrer
-          </button>
-        </section>
-      )}
+              </section>
+            )}
 
-      {config && overrideEntries.length > 0 && (
-        <section
-          className="sp-panel mb-4 p-5 sm:p-6"
-          aria-label="Surcharges de Frame Time"
-        >
-          <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-[0.14em] text-primary">
-            Surcharges de durée
-          </h2>
-          <ul className="m-0 mb-3 flex list-none flex-wrap gap-2 p-0">
-            {overrideEntries.map(({ index, frameCount }) => (
-              <li key={index}>
+            {overrideEntries.length > 0 && (
+              <section
+                className="sp-panel p-4 sm:p-5"
+                aria-label="Surcharges de Frame Time"
+              >
+                <SectionTitle>Surcharges de durée</SectionTitle>
+                <ul className="m-0 mb-3 flex list-none flex-wrap gap-2 p-0">
+                  {overrideEntries.map(({ index, frameCount }) => (
+                    <li key={index}>
+                      <button
+                        type="button"
+                        className={cx(
+                          'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+                          frameIndex === index && isPaused
+                            ? 'border-primary bg-primary text-primary-foreground'
+                            : 'border-border bg-muted text-foreground hover:border-primary/40'
+                        )}
+                        onClick={() => goToFrameAndPause(index)}
+                        title={`Afficher ${getFrameLabel(index, config, appendEmptyFrame)} et mettre en pause`}
+                      >
+                        <span>{getFrameLabel(index, config, appendEmptyFrame)}</span>
+                        <span className="tabular-nums opacity-80">
+                          {frameCount} frame{frameCount > 1 ? 's' : ''}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
                 <button
                   type="button"
-                  className={cx(
-                    'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
-                    frameIndex === index && isPaused
-                      ? 'border-primary bg-primary text-primary-foreground'
-                      : 'border-border bg-muted text-foreground hover:border-primary/40'
-                  )}
-                  onClick={() => goToFrameAndPause(index)}
-                  title={`Afficher ${getFrameLabel(index, config, appendEmptyFrame)} et mettre en pause`}
+                  className={cx(btnSecondary, 'w-full')}
+                  onClick={resetAllFramesPerImageOverrides}
                 >
-                  <span>{getFrameLabel(index, config, appendEmptyFrame)}</span>
-                  <span className="tabular-nums opacity-80">
-                    {frameCount} frame{frameCount > 1 ? 's' : ''}
-                  </span>
+                  Tout réinitialiser
                 </button>
-              </li>
-            ))}
-          </ul>
-          <button
-            type="button"
-            className={btnSecondary}
-            onClick={resetAllFramesPerImageOverrides}
-          >
-            Réinitialiser toutes les surcharges
-          </button>
-        </section>
-      )}
+              </section>
+            )}
 
-      {config && offsetEntries.length > 0 && (
-        <section
-          className="sp-panel p-5 sm:p-6"
-          aria-label="Décalages de frames"
-        >
-          <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-[0.14em] text-primary">
-            Décalages
-          </h2>
-          <ul className="m-0 mb-3 flex list-none flex-wrap gap-2 p-0">
-            {offsetEntries.map(({ index, offset }) => (
-              <li key={index}>
+            {offsetEntries.length > 0 && (
+              <section
+                className="sp-panel p-4 sm:p-5"
+                aria-label="Décalages de frames"
+              >
+                <SectionTitle>Décalages</SectionTitle>
+                <ul className="m-0 mb-3 flex list-none flex-wrap gap-2 p-0">
+                  {offsetEntries.map(({ index, offset }) => (
+                    <li key={index}>
+                      <button
+                        type="button"
+                        className={cx(
+                          'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+                          frameIndex === index && isPaused
+                            ? 'border-primary bg-primary text-primary-foreground'
+                            : 'border-border bg-muted text-foreground hover:border-primary/40'
+                        )}
+                        onClick={() => goToFrameAndPause(index)}
+                        title={`Afficher ${getFrameLabel(index, config, appendEmptyFrame)} et mettre en pause`}
+                      >
+                        <span>{getFrameLabel(index, config, appendEmptyFrame)}</span>
+                        <span className="tabular-nums opacity-80">
+                          {formatOffsetLabel(offset)}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
                 <button
                   type="button"
-                  className={cx(
-                    'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
-                    frameIndex === index && isPaused
-                      ? 'border-primary bg-primary text-primary-foreground'
-                      : 'border-border bg-muted text-foreground hover:border-primary/40'
-                  )}
-                  onClick={() => goToFrameAndPause(index)}
-                  title={`Afficher ${getFrameLabel(index, config, appendEmptyFrame)} et mettre en pause`}
+                  className={cx(btnSecondary, 'w-full')}
+                  onClick={resetAllFrameOffsets}
                 >
-                  <span>{getFrameLabel(index, config, appendEmptyFrame)}</span>
-                  <span className="tabular-nums opacity-80">
-                    {formatOffsetLabel(offset)}
-                  </span>
+                  Tout réinitialiser
                 </button>
-              </li>
-            ))}
-          </ul>
-          <button
-            type="button"
-            className={btnSecondary}
-            onClick={resetAllFrameOffsets}
-          >
-            Tout réinitialiser
-          </button>
-        </section>
-      )}
+              </section>
+            )}
+          </aside>
+        )}
+      </div>
 
       {/* Image cachée pour lire naturalWidth / naturalHeight */}
       {imageSrc && (
