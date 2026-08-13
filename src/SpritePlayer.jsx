@@ -27,6 +27,34 @@ function getFrameLabel(index, config, hasEmptyTail) {
   return `Image ${index + 1}`;
 }
 
+function isExcludedIndex(excludedFrames, index) {
+  return Boolean(excludedFrames?.[index]);
+}
+
+/** Prochaine image active en boucle (saute les indices retirés). */
+function findNextActiveIndex(fromIndex, count, excludedFrames) {
+  if (count <= 0) return 0;
+  for (let step = 1; step <= count; step += 1) {
+    const next = (fromIndex + step) % count;
+    if (!isExcludedIndex(excludedFrames, next)) return next;
+  }
+  return fromIndex;
+}
+
+function findFirstActiveIndex(count, excludedFrames) {
+  for (let i = 0; i < count; i += 1) {
+    if (!isExcludedIndex(excludedFrames, i)) return i;
+  }
+  return 0;
+}
+
+function findLastActiveIndex(count, excludedFrames) {
+  for (let i = count - 1; i >= 0; i -= 1) {
+    if (!isExcludedIndex(excludedFrames, i)) return i;
+  }
+  return Math.max(0, count - 1);
+}
+
 /** Orientation alignée sur le côté le plus long de l'image. */
 function detectOrientationFromSize(width, height) {
   if (width > height) return 'horizontal';
@@ -240,6 +268,8 @@ export default function SpritePlayer() {
   const [emptyFrameUseBgColor, setEmptyFrameUseBgColor] = useState(false);
   const [emptyFrameBgColor, setEmptyFrameBgColor] = useState('#000000');
   const [framesPerImageOverrides, setFramesPerImageOverrides] = useState({});
+  /** Indices exclus de la boucle de lecture (soft-disable). */
+  const [excludedFrames, setExcludedFrames] = useState({});
   const [flipX, setFlipX] = useState(false);
   const [error, setError] = useState('');
   const dragCounterRef = useRef(0);
@@ -256,6 +286,7 @@ export default function SpritePlayer() {
     setFrameIndex(0);
     setIsPaused(false);
     setFramesPerImageOverrides({});
+    setExcludedFrames({});
     setFlipX(false);
     setEmptyFrameUseBgColor(false);
     setEmptyFrameBgColor('#000000');
@@ -361,6 +392,7 @@ export default function SpritePlayer() {
     setFrameIndex(0);
     setIsPaused(false);
     setFramesPerImageOverrides({});
+    setExcludedFrames({});
   }, [imageSrc, naturalSize, framesInput, orientation]);
 
   const playbackFrameCount = config
@@ -369,6 +401,32 @@ export default function SpritePlayer() {
 
   const isEmptyFrame =
     Boolean(config) && appendEmptyFrame && frameIndex >= config.frames;
+
+  const isCurrentExcluded = isExcludedIndex(excludedFrames, frameIndex);
+
+  const activeFrameIndices = useMemo(() => {
+    if (playbackFrameCount === 0) return [];
+    return Array.from({ length: playbackFrameCount }, (_, index) => index).filter(
+      (index) => !isExcludedIndex(excludedFrames, index)
+    );
+  }, [playbackFrameCount, excludedFrames]);
+
+  const activePlaybackCount = activeFrameIndices.length;
+  const activePosition = activeFrameIndices.indexOf(frameIndex);
+
+  const excludedEntries = useMemo(() => {
+    if (!config || playbackFrameCount === 0) return [];
+    return Object.keys(excludedFrames)
+      .map((key) => Number(key))
+      .filter(
+        (index) =>
+          Number.isFinite(index) &&
+          index >= 0 &&
+          index < playbackFrameCount &&
+          isExcludedIndex(excludedFrames, index)
+      )
+      .sort((a, b) => a - b);
+  }, [excludedFrames, config, playbackFrameCount]);
 
   const goPrevFrame = useCallback(() => {
     if (!config || playbackFrameCount === 0) return;
@@ -393,19 +451,26 @@ export default function SpritePlayer() {
           delete next[config.frames];
           return next;
         });
+        setExcludedFrames((prev) => {
+          if (!isExcludedIndex(prev, config.frames)) return prev;
+          const next = { ...prev };
+          delete next[config.frames];
+          return next;
+        });
       }
     },
     [config, frameIndex]
   );
 
   const goToStart = useCallback(() => {
-    setFrameIndex(0);
-  }, []);
+    if (!config || playbackFrameCount === 0) return;
+    setFrameIndex(findFirstActiveIndex(playbackFrameCount, excludedFrames));
+  }, [config, playbackFrameCount, excludedFrames]);
 
   const goToEnd = useCallback(() => {
     if (!config || playbackFrameCount === 0) return;
-    setFrameIndex(playbackFrameCount - 1);
-  }, [config, playbackFrameCount]);
+    setFrameIndex(findLastActiveIndex(playbackFrameCount, excludedFrames));
+  }, [config, playbackFrameCount, excludedFrames]);
 
   const togglePause = useCallback(() => {
     setIsPaused((p) => !p);
@@ -463,6 +528,40 @@ export default function SpritePlayer() {
     setFramesPerImageOverrides({});
   }, []);
 
+  const canExcludeCurrentFrame =
+    Boolean(config) &&
+    playbackFrameCount > 0 &&
+    (isCurrentExcluded || activePlaybackCount > 1);
+
+  const toggleCurrentFrameExcluded = useCallback(() => {
+    if (!config || playbackFrameCount === 0) return;
+
+    if (isExcludedIndex(excludedFrames, frameIndex)) {
+      setExcludedFrames((prev) => {
+        const next = { ...prev };
+        delete next[frameIndex];
+        return next;
+      });
+      return;
+    }
+
+    if (activePlaybackCount <= 1) return;
+
+    const nextExcluded = { ...excludedFrames, [frameIndex]: true };
+    setExcludedFrames(nextExcluded);
+    setFrameIndex(findNextActiveIndex(frameIndex, playbackFrameCount, nextExcluded));
+  }, [
+    config,
+    playbackFrameCount,
+    excludedFrames,
+    frameIndex,
+    activePlaybackCount,
+  ]);
+
+  const restoreAllExcludedFrames = useCallback(() => {
+    setExcludedFrames({});
+  }, []);
+
   const goToFrameAndPause = useCallback((index) => {
     setFrameIndex(index);
     setIsPaused(true);
@@ -490,10 +589,16 @@ export default function SpritePlayer() {
 
   useEffect(() => {
     if (!config || isPaused || playbackFrameCount === 0) return;
+    if (activePlaybackCount === 0) return;
+
+    if (isExcludedIndex(excludedFrames, frameIndex)) {
+      setFrameIndex(findNextActiveIndex(frameIndex, playbackFrameCount, excludedFrames));
+      return;
+    }
 
     const delayMs = getEffectiveDurationMs(frameIndex);
     const id = window.setTimeout(() => {
-      setFrameIndex((i) => (i + 1) % playbackFrameCount);
+      setFrameIndex((i) => findNextActiveIndex(i, playbackFrameCount, excludedFrames));
     }, delayMs);
 
     return () => window.clearTimeout(id);
@@ -502,9 +607,11 @@ export default function SpritePlayer() {
     fps,
     framesPerImage,
     framesPerImageOverrides,
+    excludedFrames,
     config,
     isPaused,
     playbackFrameCount,
+    activePlaybackCount,
     getEffectiveDurationMs,
   ]);
 
@@ -921,6 +1028,7 @@ export default function SpritePlayer() {
                 const isActive = index === frameIndex;
                 const isEmptyTick = appendEmptyFrame && index >= config.frames;
                 const hasOverride = framesPerImageOverrides[index] != null;
+                const isExcluded = isExcludedIndex(excludedFrames, index);
                 const label = isEmptyTick ? 'V' : String(index + 1);
                 const fullLabel = getFrameLabel(index, config, appendEmptyFrame);
 
@@ -931,12 +1039,14 @@ export default function SpritePlayer() {
                     role="listitem"
                     ref={isActive ? timelineActiveTickRef : null}
                     className={cx(
-                      'relative inline-flex size-8 shrink-0 items-center justify-center rounded border text-xs font-semibold tabular-nums transition-colors',
+                      'relative inline-flex size-8 shrink-0 items-center justify-center overflow-hidden rounded border text-xs font-semibold tabular-nums transition-colors',
                       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                       isActive
                         ? 'border-primary bg-primary text-primary-foreground'
                         : 'border-border bg-muted text-muted-foreground hover:border-primary/40 hover:bg-muted/80 hover:text-foreground',
                       isEmptyTick && !isActive && 'border-dashed',
+                      isExcluded && !isActive && 'opacity-45',
+                      isExcluded && isActive && 'opacity-80',
                       !isPaused && 'cursor-not-allowed opacity-70',
                       !isPaused && isActive && 'opacity-100'
                     )}
@@ -944,17 +1054,42 @@ export default function SpritePlayer() {
                     aria-current={isActive ? 'true' : undefined}
                     aria-label={
                       isPaused
-                        ? `Aller à ${fullLabel}`
-                        : `${fullLabel}${isActive ? ' (en lecture)' : ''}`
+                        ? `Aller à ${fullLabel}${isExcluded ? ' (retirée)' : ''}`
+                        : `${fullLabel}${isActive ? ' (en lecture)' : ''}${isExcluded ? ' (retirée)' : ''}`
                     }
                     title={
                       isPaused
-                        ? `Afficher ${fullLabel}`
+                        ? isExcluded
+                          ? `${fullLabel} — retirée de l’animation`
+                          : `Afficher ${fullLabel}`
                         : 'Mettez en pause pour sélectionner une image'
                     }
                     onClick={() => goToFrameAndPause(index)}
                   >
                     <span className="pointer-events-none">{label}</span>
+                    {isExcluded && (
+                      <span
+                        className="pointer-events-none absolute inset-0"
+                        aria-hidden
+                      >
+                        <svg
+                          className="absolute inset-0 size-full"
+                          viewBox="0 0 32 32"
+                          preserveAspectRatio="none"
+                        >
+                          <line
+                            x1="6"
+                            y1="26"
+                            x2="26"
+                            y2="6"
+                            stroke="currentColor"
+                            strokeWidth="2.25"
+                            strokeLinecap="round"
+                            opacity="0.9"
+                          />
+                        </svg>
+                      </span>
+                    )}
                     {hasOverride && (
                       <span
                         className={cx(
@@ -981,9 +1116,11 @@ export default function SpritePlayer() {
                 className="rounded-full border border-white/10 bg-black/25 px-2.5 py-1 text-xs font-medium tabular-nums text-muted-foreground"
                 aria-live="polite"
               >
-                {isEmptyFrame
-                  ? `Vide · ${playbackFrameCount} / ${playbackFrameCount}`
-                  : `Image ${frameIndex + 1} / ${playbackFrameCount}`}
+                {isCurrentExcluded
+                  ? `${getFrameLabel(frameIndex, config, appendEmptyFrame)} · retirée`
+                  : isEmptyFrame
+                    ? `Vide · ${activePosition + 1} / ${activePlaybackCount}`
+                    : `Image ${activePosition + 1} / ${activePlaybackCount}`}
                 {isPaused ? ' · en pause' : ''}
               </span>
               {isPaused && (
@@ -1040,6 +1177,36 @@ export default function SpritePlayer() {
                   </div>
                 </label>
               )}
+              {isPaused && (
+                <button
+                  type="button"
+                  className={cx(
+                    btnSecondary,
+                    'text-xs',
+                    isCurrentExcluded && 'border-primary/50 text-primary'
+                  )}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleCurrentFrameExcluded();
+                  }}
+                  disabled={!canExcludeCurrentFrame}
+                  title={
+                    isCurrentExcluded
+                      ? 'Remettre cette image dans la boucle'
+                      : canExcludeCurrentFrame
+                        ? 'Retirer cette image de la boucle (sans modifier la feuille)'
+                        : 'Impossible de retirer la dernière image active'
+                  }
+                  aria-pressed={isCurrentExcluded}
+                  aria-label={
+                    isCurrentExcluded
+                      ? 'Remettre dans l’animation'
+                      : 'Retirer de l’animation'
+                  }
+                >
+                  {isCurrentExcluded ? 'Remettre dans l’animation' : 'Retirer de l’animation'}
+                </button>
+              )}
             </div>
             <div className="flex overflow-hidden rounded-full border border-border bg-muted">
               <button
@@ -1092,6 +1259,64 @@ export default function SpritePlayer() {
           </div>
         )}
       </section>
+
+      {config && excludedEntries.length > 0 && (
+        <section
+          className="sp-panel mb-4 p-5 sm:p-6"
+          aria-label="Images retirées de l’animation"
+        >
+          <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-[0.14em] text-primary">
+            Images retirées
+          </h2>
+          <ul className="m-0 mb-3 flex list-none flex-wrap gap-2 p-0">
+            {excludedEntries.map((index) => (
+              <li key={index}>
+                <button
+                  type="button"
+                  className={cx(
+                    'relative inline-flex items-center gap-2 overflow-hidden rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+                    frameIndex === index && isPaused
+                      ? 'border-primary bg-primary text-primary-foreground'
+                      : 'border-border bg-muted text-foreground hover:border-primary/40'
+                  )}
+                  onClick={() => goToFrameAndPause(index)}
+                  title={`Afficher ${getFrameLabel(index, config, appendEmptyFrame)} et mettre en pause`}
+                >
+                  <span>{getFrameLabel(index, config, appendEmptyFrame)}</span>
+                  <span
+                    className="pointer-events-none absolute inset-0"
+                    aria-hidden
+                  >
+                    <svg
+                      className="absolute inset-0 size-full"
+                      viewBox="0 0 96 28"
+                      preserveAspectRatio="none"
+                    >
+                      <line
+                        x1="8"
+                        y1="22"
+                        x2="88"
+                        y2="6"
+                        stroke="currentColor"
+                        strokeWidth="1.75"
+                        strokeLinecap="round"
+                        opacity="0.55"
+                      />
+                    </svg>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            className={btnSecondary}
+            onClick={restoreAllExcludedFrames}
+          >
+            Tout réintégrer
+          </button>
+        </section>
+      )}
 
       {config && overrideEntries.length > 0 && (
         <section

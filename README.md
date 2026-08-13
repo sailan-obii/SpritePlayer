@@ -1,6 +1,6 @@
 # SpritePlayer
 
-🌐 **Site déployé :** [https://deltadjazz.github.io/SpritePlayer/](https://deltadjazz.github.io/SpritePlayer/)
+🌐 **Site déployé :** [https://sailan_obii.github.io/SpritePlayer/](https://sailan-obii.github.io/SpritePlayer/)
 
 Petit outil web pour prévisualiser une **sprite sheet** (PNG ou JPEG) en **boucle**, comme un GIF animé. Tout s’exécute **dans le navigateur** : aucun serveur ni upload de fichiers n’est requis.
 
@@ -42,6 +42,7 @@ Le site sera ensuite accessible à l’adresse ci-dessus (après activation éve
   - bouton **Valider & Lancer** : calcule la taille d’une frame à partir des dimensions réelles (`naturalWidth` / `naturalHeight`).
 - **Vitesse** : curseur **1 à 60 FPS** ; le changement s’applique tout de suite à l’animation en cours (`useEffect` + intervalle).
 - **Lecture** : **Pause** / **Lecture**, **Précédent** / **Suivant** (image à image), **Début** (retour à la première frame) ; compteur « Image n / total ».
+- **Retrait d’images** : en pause, **Retirer de l’animation** / **Remettre** (soft-disable) ; cases barrées sur la timeline ; panneau **Images retirées** avec **Tout réintégrer**. La lecture saute les images retirées sans modifier la feuille.
 - **Rendu** : `background-image` + `background-position` (sans transition CSS), zone d’aperçu sur fond sombre, `image-rendering: pixelated` pour le pixel art.
 
 ## Prérequis
