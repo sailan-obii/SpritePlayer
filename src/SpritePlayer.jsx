@@ -1422,7 +1422,7 @@ export default function SpritePlayer() {
                 </div>
               </div>
             </div>
-            {isPaused && canOffsetCurrentFrame && (
+            {isPaused && (
               <div className="border-t border-border px-4 py-2.5">
                 <div className="flex justify-center">
                   <button
@@ -1430,24 +1430,33 @@ export default function SpritePlayer() {
                     className={cx(
                       btnSecondary,
                       'h-[2.125rem] min-w-[8.5rem] text-xs',
-                      (positionPanelOpen || currentOffset.x !== 0 || currentOffset.y !== 0) &&
+                      canOffsetCurrentFrame &&
+                        (positionPanelOpen || currentOffset.x !== 0 || currentOffset.y !== 0) &&
                         'text-primary'
                     )}
                     onClick={(e) => {
                       e.stopPropagation();
+                      if (!canOffsetCurrentFrame) return;
                       setPositionPanelOpen((open) => !open);
                     }}
-                    aria-expanded={positionPanelOpen}
+                    disabled={!canOffsetCurrentFrame}
+                    aria-expanded={positionPanelOpen && canOffsetCurrentFrame}
                     aria-controls="frame-position-panel"
-                    title="Modifier la position de cette image"
+                    title={
+                      isCurrentExcluded
+                        ? 'Impossible de déplacer une image retirée'
+                        : isEmptyFrame
+                          ? 'Impossible de déplacer l’image vide'
+                          : 'Modifier la position de cette image'
+                    }
                   >
                     Position
                     <span className="text-[0.65rem] opacity-80" aria-hidden>
-                      {positionPanelOpen ? '▴' : '▾'}
+                      {positionPanelOpen && canOffsetCurrentFrame ? '▴' : '▾'}
                     </span>
                   </button>
                 </div>
-                {positionPanelOpen && (
+                {positionPanelOpen && canOffsetCurrentFrame && (
                   <div
                     id="frame-position-panel"
                     className="mt-2.5 grid grid-cols-[1fr_1fr_1fr] items-end gap-x-4 mb-5"
