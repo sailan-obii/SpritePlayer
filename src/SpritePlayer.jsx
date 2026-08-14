@@ -50,6 +50,16 @@ function findNextActiveIndex(fromIndex, count, excludedFrames) {
   return fromIndex;
 }
 
+/** Image active précédente en boucle (saute les indices retirés). */
+function findPrevActiveIndex(fromIndex, count, excludedFrames) {
+  if (count <= 0) return 0;
+  for (let step = 1; step <= count; step += 1) {
+    const prev = (fromIndex - step + count) % count;
+    if (!isExcludedIndex(excludedFrames, prev)) return prev;
+  }
+  return fromIndex;
+}
+
 function findFirstActiveIndex(count, excludedFrames) {
   for (let i = 0; i < count; i += 1) {
     if (!isExcludedIndex(excludedFrames, i)) return i;
@@ -526,13 +536,13 @@ export default function SpritePlayer() {
 
   const goPrevFrame = useCallback(() => {
     if (!config || playbackFrameCount === 0) return;
-    setFrameIndex((i) => (i - 1 + playbackFrameCount) % playbackFrameCount);
-  }, [config, playbackFrameCount]);
+    setFrameIndex((i) => findPrevActiveIndex(i, playbackFrameCount, excludedFrames));
+  }, [config, playbackFrameCount, excludedFrames]);
 
   const goNextFrame = useCallback(() => {
     if (!config || playbackFrameCount === 0) return;
-    setFrameIndex((i) => (i + 1) % playbackFrameCount);
-  }, [config, playbackFrameCount]);
+    setFrameIndex((i) => findNextActiveIndex(i, playbackFrameCount, excludedFrames));
+  }, [config, playbackFrameCount, excludedFrames]);
 
   const handleAppendEmptyFrameChange = useCallback(
     (e) => {
