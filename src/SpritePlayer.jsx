@@ -1003,16 +1003,7 @@ export default function SpritePlayer() {
         </p>
       )}
 
-      <div
-        className={cx(
-          'grid gap-4 lg:items-start',
-          excludedEntries.length > 0 ||
-            overrideEntries.length > 0 ||
-            offsetEntries.length > 0
-            ? 'lg:grid-cols-[minmax(220px,260px)_minmax(0,1fr)_minmax(220px,260px)]'
-            : 'lg:grid-cols-[minmax(220px,260px)_minmax(0,1fr)]'
-        )}
-      >
+      <div className="grid gap-4 lg:grid-cols-[minmax(220px,260px)_minmax(0,1fr)_minmax(220px,260px)] lg:items-start">
         <aside className="order-2 flex flex-col gap-4 lg:order-1 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto lg:[scrollbar-width:thin]">
         <section className="sp-panel p-4 sm:p-5">
           <SectionTitle icon={<IconSpriteSheet />}>Feuille de sprites</SectionTitle>
@@ -1103,42 +1094,6 @@ export default function SpritePlayer() {
             <button type="button" className={cx(btnPrimary, 'w-full')} onClick={handleValidate}>
               Valider &amp; Lancer
             </button>
-            <button
-              type="button"
-              className={cx(
-                btnSecondary,
-                'w-full',
-                flipX && 'border-primary bg-muted text-primary'
-              )}
-              onClick={toggleFlipX}
-              disabled={!imageSrc}
-              aria-pressed={flipX}
-              title="Inverser horizontalement (scaleX -1)"
-              aria-label="Inverser horizontalement"
-            >
-              <IconFlipX />
-              Flip X
-            </button>
-            <button
-              type="button"
-              className={cx(btnSecondary, 'w-full')}
-              onClick={handleDownloadSheet}
-              disabled={!config || activeFrameIndices.length === 0}
-              title={
-                config
-                  ? 'Télécharger la feuille PNG (images actives, offsets, fond et Flip X)'
-                  : 'Validez la feuille pour télécharger'
-              }
-              aria-label="Télécharger la feuille"
-            >
-              <IconDownload />
-              Télécharger la feuille
-            </button>
-            {config && (
-              <p className="m-0 text-xs text-muted-foreground">
-                PNG des images encore actives, avec décalages, fond et Flip X.
-              </p>
-            )}
           </div>
         </section>
 
@@ -1681,10 +1636,42 @@ export default function SpritePlayer() {
       </section>
         </div>
 
-        {(excludedEntries.length > 0 ||
-          overrideEntries.length > 0 ||
-          offsetEntries.length > 0) && (
-          <aside className="order-3 flex flex-col gap-4 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto lg:[scrollbar-width:thin]">
+        <aside className="order-3 flex flex-col gap-4 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto lg:[scrollbar-width:thin]">
+            <section className="sp-panel p-4 sm:p-5">
+              <div className="flex flex-col gap-2">
+                <button
+                  type="button"
+                  className={cx(
+                    btnSecondary,
+                    'w-full',
+                    flipX && 'border-primary bg-muted text-primary'
+                  )}
+                  onClick={toggleFlipX}
+                  disabled={!imageSrc}
+                  aria-pressed={flipX}
+                  title="Inverser horizontalement (scaleX -1)"
+                  aria-label="Inverser horizontalement"
+                >
+                  <IconFlipX />
+                  Flip X
+                </button>
+                <button
+                  type="button"
+                  className={cx(btnSecondary, 'w-full')}
+                  onClick={handleDownloadSheet}
+                  disabled={!config || activeFrameIndices.length === 0}
+                  title={
+                    config
+                      ? 'Télécharger la feuille PNG (images actives, offsets, fond et Flip X)'
+                      : 'Validez la feuille pour télécharger'
+                  }
+                  aria-label="Télécharger la feuille"
+                >
+                  <IconDownload />
+                  Télécharger la feuille
+                </button>
+              </div>
+            </section>
             {excludedEntries.length > 0 && (
               <section
                 className="sp-panel p-4 sm:p-5"
@@ -1817,7 +1804,6 @@ export default function SpritePlayer() {
               </section>
             )}
           </aside>
-        )}
       </div>
 
       {/* Image cachée pour lire naturalWidth / naturalHeight */}
