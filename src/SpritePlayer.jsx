@@ -1,12 +1,15 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   clampOffset,
+  composeExportedSheet,
   computeFrameSize,
+  downloadCanvasPng,
   drawIsolatedFrame,
   formatOffsetLabel,
   getStoredOffset,
   hasNonZeroOffset,
   nudgeStep,
+  toExportFileName,
 } from './frameRender';
 
 const ACCEPTED_TYPES = ['image/png', 'image/jpeg', 'image/jpg'];
@@ -206,6 +209,32 @@ function IconSpeed() {
   );
 }
 
+function IconDownload() {
+  return (
+    <svg className="size-4 shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M12 4v11"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M7.5 11.5 12 16l4.5-4.5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M5 19h14"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 function IconFlipX() {
   return (
     <svg className="size-4 shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -349,6 +378,7 @@ export default function SpritePlayer() {
   const [frameOffsets, setFrameOffsets] = useState({});
   const [positionPanelOpen, setPositionPanelOpen] = useState(false);
   const [flipX, setFlipX] = useState(false);
+  const [sourceFileName, setSourceFileName] = useState('spritesheet');
   const [error, setError] = useState('');
   const dragCounterRef = useRef(0);
   const fileInputRef = useRef(null);
@@ -373,6 +403,10 @@ export default function SpritePlayer() {
     setUseBgColor(false);
     setBgColor('#000000');
     setNaturalSize({ w: 0, h: 0 });
+    const base = String(file.name || '')
+      .replace(/\.[^.]+$/i, '')
+      .trim();
+    setSourceFileName(base || 'spritesheet');
 
     const reader = new FileReader();
     reader.onload = () => {
@@ -682,6 +716,42 @@ export default function SpritePlayer() {
   const toggleFlipX = useCallback(() => {
     setFlipX((prev) => !prev);
   }, []);
+
+  const handleDownloadSheet = useCallback(async () => {
+    if (!config || activeFrameIndices.length === 0) return;
+    const image = sheetImageRef.current;
+    if (!image || !image.complete || image.naturalWidth < 1) {
+      setError('Image source indisponible pour l’export.');
+      return;
+    }
+
+    const sheet = document.createElement('canvas');
+    composeExportedSheet(sheet, {
+      image,
+      config,
+      activeIndices: activeFrameIndices,
+      offsets: frameOffsets,
+      fillColor: useBgColor ? bgColor : null,
+      flipX,
+      isEmptyIndex: (index) => appendEmptyFrame && index >= config.frames,
+    });
+
+    try {
+      await downloadCanvasPng(sheet, toExportFileName(sourceFileName));
+      setError('');
+    } catch {
+      setError('Export PNG impossible.');
+    }
+  }, [
+    config,
+    activeFrameIndices,
+    frameOffsets,
+    useBgColor,
+    bgColor,
+    flipX,
+    appendEmptyFrame,
+    sourceFileName,
+  ]);
 
   const canOffsetCurrentFrame =
     Boolean(config) &&
@@ -1049,6 +1119,26 @@ export default function SpritePlayer() {
               <IconFlipX />
               Flip X
             </button>
+            <button
+              type="button"
+              className={cx(btnSecondary, 'w-full')}
+              onClick={handleDownloadSheet}
+              disabled={!config || activeFrameIndices.length === 0}
+              title={
+                config
+                  ? 'Télécharger la feuille PNG (images actives, offsets, fond et Flip X)'
+                  : 'Validez la feuille pour télécharger'
+              }
+              aria-label="Télécharger la feuille"
+            >
+              <IconDownload />
+              Télécharger la feuille
+            </button>
+            {config && (
+              <p className="m-0 text-xs text-muted-foreground">
+                PNG des images encore actives, avec décalages, fond et Flip X.
+              </p>
+            )}
           </div>
         </section>
 

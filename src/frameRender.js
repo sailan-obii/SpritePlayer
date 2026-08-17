@@ -82,6 +82,56 @@ export function nudgeStep(shiftKey) {
 }
 
 /**
+ * Grille de la feuille exportée : une case par frame encore active, même orientation.
+ * En grille, on conserve le nombre de colonnes d’origine (réduit s’il reste moins de frames).
+ */
+export function getExportSheetLayout(orientation, activeCount, columns) {
+  const n = Math.max(0, Number(activeCount) || 0);
+  if (n === 0) {
+    return { columns: 0, rows: 0 };
+  }
+  if (orientation === 'horizontal') {
+    return { columns: n, rows: 1 };
+  }
+  if (orientation === 'vertical') {
+    return { columns: 1, rows: n };
+  }
+  const cols = Math.max(1, Math.min(Math.max(1, columns ?? 1), n));
+  return { columns: cols, rows: Math.ceil(n / cols) };
+}
+
+export function toExportFileName(baseName) {
+  const safe = String(baseName || 'spritesheet')
+    .replace(/[/\\?%*:|"<>]/g, '-')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .trim();
+  return `${safe || 'spritesheet'}-export.png`;
+}
+
+export function downloadCanvasPng(canvas, filename) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error('Export PNG impossible.'));
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      link.rel = 'noopener';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+      resolve();
+    }, 'image/png');
+  });
+}
+
+/**
  * Dessine une frame isolée dans `canvas` (taille = case).
  * Ordre : fond → collage à (offsetX, offsetY) → Flip X.
  * Réutilisable pour l’aperçu et l’export PNG.
@@ -139,4 +189,67 @@ export function drawIsolatedFrame(canvas, {
   dest.scale(-1, 1);
   dest.drawImage(buffer, 0, 0);
   dest.restore();
+}
+
+/**
+ * Assemble une sprite sheet à partir des frames actives.
+ * Chaque frame est d’abord dessinée sur un canvas isolé (taille = case)
+ * pour qu’un sprite décalé ne déborde pas sur la case voisine.
+ * Le `config` d’origine sert à lire les rectangles source ; seuls `activeIndices` sont collés.
+ */
+export function composeExportedSheet(sheetCanvas, {
+  image,
+  config,
+  activeIndices,
+  offsets,
+  fillColor = null,
+  flipX = false,
+  isEmptyIndex,
+}) {
+  const indices = Array.isArray(activeIndices) ? activeIndices : [];
+  const layout = getExportSheetLayout(config.orientation, indices.length, config.columns);
+  const { frameW, frameH } = config;
+  const sheetW = Math.max(1, layout.columns * frameW);
+  const sheetH = Math.max(1, layout.rows * frameH);
+
+  if (sheetCanvas.width !== sheetW) sheetCanvas.width = sheetW;
+  if (sheetCanvas.height !== sheetH) sheetCanvas.height = sheetH;
+
+  const dest = sheetCanvas.getContext('2d');
+  if (!dest) return layout;
+
+  dest.imageSmoothingEnabled = false;
+  dest.clearRect(0, 0, sheetW, sheetH);
+
+  const cols = Math.max(1, layout.columns);
+  for (let i = 0; i < indices.length; i += 1) {
+    const frameIndex = indices[i];
+    const { x, y } = getStoredOffset(offsets, frameIndex);
+    const cell = document.createElement('canvas');
+    drawIsolatedFrame(cell, {
+      image,
+      config,
+      frameIndex,
+      offsetX: x,
+      offsetY: y,
+      fillColor,
+      flipX,
+      isEmpty: Boolean(isEmptyIndex?.(frameIndex)),
+    });
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    dest.drawImage(cell, col * frameW, row * frameH);
+  }
+
+  const totalCells = layout.columns * layout.rows;
+  if (fillColor && totalCells > indices.length) {
+    dest.fillStyle = fillColor;
+    for (let i = indices.length; i < totalCells; i += 1) {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      dest.fillRect(col * frameW, row * frameH, frameW, frameH);
+    }
+  }
+
+  return layout;
 }
