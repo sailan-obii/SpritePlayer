@@ -1,12 +1,15 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   clampOffset,
+  composeExportedSheet,
   computeFrameSize,
+  downloadCanvasPng,
   drawIsolatedFrame,
   formatOffsetLabel,
   getStoredOffset,
   hasNonZeroOffset,
   nudgeStep,
+  toExportFileName,
 } from './frameRender';
 
 const ACCEPTED_TYPES = ['image/png', 'image/jpeg', 'image/jpg'];
@@ -206,6 +209,32 @@ function IconSpeed() {
   );
 }
 
+function IconDownload() {
+  return (
+    <svg className="size-4 shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M12 4v11"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M7.5 11.5 12 16l4.5-4.5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M5 19h14"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 function IconFlipX() {
   return (
     <svg className="size-4 shrink-0" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -349,6 +378,7 @@ export default function SpritePlayer() {
   const [frameOffsets, setFrameOffsets] = useState({});
   const [positionPanelOpen, setPositionPanelOpen] = useState(false);
   const [flipX, setFlipX] = useState(false);
+  const [sourceFileName, setSourceFileName] = useState('spritesheet');
   const [error, setError] = useState('');
   const dragCounterRef = useRef(0);
   const fileInputRef = useRef(null);
@@ -373,6 +403,10 @@ export default function SpritePlayer() {
     setUseBgColor(false);
     setBgColor('#000000');
     setNaturalSize({ w: 0, h: 0 });
+    const base = String(file.name || '')
+      .replace(/\.[^.]+$/i, '')
+      .trim();
+    setSourceFileName(base || 'spritesheet');
 
     const reader = new FileReader();
     reader.onload = () => {
@@ -683,6 +717,42 @@ export default function SpritePlayer() {
     setFlipX((prev) => !prev);
   }, []);
 
+  const handleDownloadSheet = useCallback(async () => {
+    if (!config || activeFrameIndices.length === 0) return;
+    const image = sheetImageRef.current;
+    if (!image || !image.complete || image.naturalWidth < 1) {
+      setError('Image source indisponible pour l’export.');
+      return;
+    }
+
+    const sheet = document.createElement('canvas');
+    composeExportedSheet(sheet, {
+      image,
+      config,
+      activeIndices: activeFrameIndices,
+      offsets: frameOffsets,
+      fillColor: useBgColor ? bgColor : null,
+      flipX,
+      isEmptyIndex: (index) => appendEmptyFrame && index >= config.frames,
+    });
+
+    try {
+      await downloadCanvasPng(sheet, toExportFileName(sourceFileName));
+      setError('');
+    } catch {
+      setError('Export PNG impossible.');
+    }
+  }, [
+    config,
+    activeFrameIndices,
+    frameOffsets,
+    useBgColor,
+    bgColor,
+    flipX,
+    appendEmptyFrame,
+    sourceFileName,
+  ]);
+
   const canOffsetCurrentFrame =
     Boolean(config) &&
     isPaused &&
@@ -933,16 +1003,7 @@ export default function SpritePlayer() {
         </p>
       )}
 
-      <div
-        className={cx(
-          'grid gap-4 lg:items-start',
-          excludedEntries.length > 0 ||
-            overrideEntries.length > 0 ||
-            offsetEntries.length > 0
-            ? 'lg:grid-cols-[minmax(220px,260px)_minmax(0,1fr)_minmax(220px,260px)]'
-            : 'lg:grid-cols-[minmax(220px,260px)_minmax(0,1fr)]'
-        )}
-      >
+      <div className="grid gap-4 lg:grid-cols-[minmax(220px,260px)_minmax(0,1fr)_minmax(220px,260px)] lg:items-start">
         <aside className="order-2 flex flex-col gap-4 lg:order-1 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto lg:[scrollbar-width:thin]">
         <section className="sp-panel p-4 sm:p-5">
           <SectionTitle icon={<IconSpriteSheet />}>Feuille de sprites</SectionTitle>
@@ -1032,22 +1093,6 @@ export default function SpritePlayer() {
           <div className="flex flex-col gap-2">
             <button type="button" className={cx(btnPrimary, 'w-full')} onClick={handleValidate}>
               Valider &amp; Lancer
-            </button>
-            <button
-              type="button"
-              className={cx(
-                btnSecondary,
-                'w-full',
-                flipX && 'border-primary bg-muted text-primary'
-              )}
-              onClick={toggleFlipX}
-              disabled={!imageSrc}
-              aria-pressed={flipX}
-              title="Inverser horizontalement (scaleX -1)"
-              aria-label="Inverser horizontalement"
-            >
-              <IconFlipX />
-              Flip X
             </button>
           </div>
         </section>
@@ -1591,10 +1636,42 @@ export default function SpritePlayer() {
       </section>
         </div>
 
-        {(excludedEntries.length > 0 ||
-          overrideEntries.length > 0 ||
-          offsetEntries.length > 0) && (
-          <aside className="order-3 flex flex-col gap-4 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto lg:[scrollbar-width:thin]">
+        <aside className="order-3 flex flex-col gap-4 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto lg:[scrollbar-width:thin]">
+            <section className="sp-panel p-4 sm:p-5">
+              <div className="flex flex-col gap-2">
+                <button
+                  type="button"
+                  className={cx(
+                    btnSecondary,
+                    'w-full',
+                    flipX && 'border-primary bg-muted text-primary'
+                  )}
+                  onClick={toggleFlipX}
+                  disabled={!imageSrc}
+                  aria-pressed={flipX}
+                  title="Inverser horizontalement (scaleX -1)"
+                  aria-label="Inverser horizontalement"
+                >
+                  <IconFlipX />
+                  Flip X
+                </button>
+                <button
+                  type="button"
+                  className={cx(btnSecondary, 'w-full')}
+                  onClick={handleDownloadSheet}
+                  disabled={!config || activeFrameIndices.length === 0}
+                  title={
+                    config
+                      ? 'Télécharger la feuille PNG (images actives, offsets, fond et Flip X)'
+                      : 'Validez la feuille pour télécharger'
+                  }
+                  aria-label="Télécharger la feuille"
+                >
+                  <IconDownload />
+                  Télécharger la feuille
+                </button>
+              </div>
+            </section>
             {excludedEntries.length > 0 && (
               <section
                 className="sp-panel p-4 sm:p-5"
@@ -1727,7 +1804,6 @@ export default function SpritePlayer() {
               </section>
             )}
           </aside>
-        )}
       </div>
 
       {/* Image cachée pour lire naturalWidth / naturalHeight */}
